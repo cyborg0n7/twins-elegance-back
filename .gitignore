@@ -44,6 +44,5 @@ Thumbs.db
 !backend/
 !backend/**
 
-# Allow gitignore
-!.gitignore
+
 
