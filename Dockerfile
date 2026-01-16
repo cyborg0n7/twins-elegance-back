@@ -7,38 +7,45 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libonig-dev \
     libxml2-dev \
+    libzip-dev \
     zip \
     unzip \
-    libpq-dev
-
-# Clear cache
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 # Install PHP extensions
-RUN docker-php-ext-install pdo pdo_mysql pdo_pgsql mbstring exif pcntl bcmath gd
+RUN docker-php-ext-install pdo pdo_mysql mysqli mbstring exif pcntl bcmath gd zip
 
-# Get Composer
+# Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 # Set working directory
 WORKDIR /var/www/html
 
-# Copy project files
+# Copy composer files
+COPY composer.json composer.lock* ./
+
+# Install dependencies WITHOUT running scripts (this is the key fix)
+RUN composer install --no-scripts --no-autoloader --optimize-autoloader --no-dev || \
+    composer install --no-scripts --no-autoloader --no-dev
+
+# Copy all application files
 COPY . .
 
-# Install dependencies
-RUN composer install --optimize-autoloader --no-dev
+# Create .env from .env.example if it doesn't exist
+RUN if [ ! -f .env ]; then cp .env.example .env 2>/dev/null || echo "APP_ENV=prod" > .env; fi
 
-# Set permissions
-RUN chown -R www-data:www-data /var/www/html/var
+# Generate optimized autoloader
+RUN composer dump-autoload --optimize --no-dev
 
-# Enable Apache mod_rewrite
-RUN a2enmod rewrite
+# Create necessary directories and set permissions
+RUN mkdir -p var/cache var/log var/sessions && \
+    chown -R www-data:www-data var/ public/
 
-# Update Apache config to point to public directory
-ENV APACHE_DOCUMENT_ROOT /var/www/html/public
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
-RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
+# Configure Apache
+ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf && \
+    sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf && \
+    a2enmod rewrite
 
 EXPOSE 80
 
